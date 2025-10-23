@@ -114,4 +114,13 @@ class AgenticDB:
         conn.commit()
         conn.close()
 
-    # Add more methods for inserting, querying, and updating as needed
+    def get_session_history(self, session_id):
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        c.execute("""
+            SELECT prompt, response, time_to_first_token, total_time, token_usage, created_at
+            FROM agent_tasks WHERE session_id = ? ORDER BY created_at ASC
+        """, (session_id,))
+        history = c.fetchall()
+        conn.close()
+        return history
