@@ -1,5 +1,5 @@
 
-# krillAGI
+# 🦐 krillAGI
 
 krillAGI is a full-stack agentic orchestration platform for LLM-powered workflows, featuring a Python FastAPI backend, Next.js/Tailwind frontend dashboard, agentic collaboration, analytics, and visualization.
 
