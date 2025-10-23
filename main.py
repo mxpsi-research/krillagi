@@ -1,8 +1,10 @@
 
-from models.chat_perf_db import ChatPerfDB
+
+# Use agentic workflow
+from models.agentic_db import AgenticDB
+from services.error_handling_orchestrator import ErrorHandlingOrchestrator
 from services.ollama_service import is_ollama_installed, is_ollama_running, get_installed_models
 from utils.ollama_utils import OLLAMA_API_URL, OLLAMA_CLOUD_DEFAULT_MODEL, prompt_model_choice
-from utils.token_utils import estimate_tokens
 import sys
 import time
 import json
@@ -16,7 +18,7 @@ def main():
         print("Ollama is not running. Please start Ollama (usually 'ollama serve') and try again.")
         sys.exit(1)
 
-    db = ChatPerfDB()
+    db = AgenticDB()
     models = get_installed_models()
     model = prompt_model_choice(models) if models else OLLAMA_CLOUD_DEFAULT_MODEL
     print(f"Using model: {model}")
@@ -75,47 +77,38 @@ def main():
             print("Invalid choice.")
 
     print("Type 'exit' to quit.")
+    orchestrator = ErrorHandlingOrchestrator(session_id=session_id)
     while True:
         prompt = input("You: ")
         if prompt.strip().lower() == "exit":
             break
-        payload = {"model": model, "prompt": prompt}
-        start_time = time.time()
-        first_token_time = None
-        response_text = ""
-        total_tokens = 0
-        try:
-            with requests.post(f"{OLLAMA_API_URL}/api/generate", json=payload, stream=True, timeout=30) as r:
-                if r.status_code != 200:
-                    print(f"Error: Ollama did not respond (HTTP {r.status_code}). Is Ollama running and is the model available?")
-                    print("Try running 'ollama serve' and ensure your model is pulled with 'ollama pull <model>'.")
-                    continue
-                got_response = False
-                for chunk in r.iter_lines():
-                    if chunk:
-                        data = json.loads(chunk.decode())
-                        token = data.get("response", "")
-                        if token:
-                            got_response = True
-                            if first_token_time is None:
-                                first_token_time = time.time() - start_time
-                            response_text += token
-                            total_tokens += estimate_tokens(token)
-                        if data.get("done"):
-                            break
-                if not got_response:
-                    print("No response received from Ollama. Check if the model is available and try again.")
-                    continue
-            total_time = time.time() - start_time
-            est_tokens = estimate_tokens(prompt)
-            db.save_perf(session_id, prompt, response_text, model, first_token_time or 0, total_time, est_tokens, total_tokens)
-            print(f"Ollama: {response_text}")
-            first_token_time_fmt = first_token_time if first_token_time is not None else 0.0
-            print(f"Perf: First token: {first_token_time_fmt:.3f}s, Total: {total_time:.3f}s, Prompt tokens: {est_tokens}, Response tokens: {total_tokens}")
-        except requests.exceptions.Timeout:
-            print("Error: Request to Ollama timed out. Is Ollama running and reachable at http://localhost:11434?")
-        except Exception as e:
-            print(f"Error during chat: {e}")
+        # Agentic workflow: decompose, assign, aggregate
+        subtasks = orchestrator.decompose_task(prompt)
+        results = orchestrator.assign_tasks(subtasks)
+        output = orchestrator.aggregate_results(results)
+        print("\nAgentic Workflow Results:")
+        print(output)
+        # Log agent tasks in DB
+        for r, subtask in zip(results, subtasks):
+            # Find agent_id (not implemented, so use None)
+            db.ensure_db()
+            conn = sqlite3.connect(db.db_path)
+            c = conn.cursor()
+            c.execute("""
+                INSERT INTO agent_tasks (agent_id, session_id, status, prompt, response, token_usage, time_to_first_token, total_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (None, session_id, "completed", subtask["prompt"], r["result"], r["token_usage"], None, r["time"]))
+            conn.commit()
+            conn.close()
+        # Log analytics
+        for r in results:
+            db.log_analytics(session_id, None, "token_usage", r["token_usage"])
+            db.log_analytics(session_id, None, "time", r["time"])
+            db.log_analytics(session_id, None, "attempts", r.get("attempts", 1))
+        # User feedback
+        feedback = input("\nReview the results above. Enter feedback or 'approve': ")
+        db.log_user_feedback(session_id, None, feedback)
+        print("Feedback recorded.")
 
 if __name__ == "__main__":
     main()
