@@ -6,6 +6,17 @@ import sqlite3
 DB_PATH = "ollama_chat_perf.db"
 
 class AgenticDB:
+    def create_session(self, name, topic=None):
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO chat_sessions (name, topic, created_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        """, (name, topic))
+        session_id = c.lastrowid
+        conn.commit()
+        conn.close()
+        return session_id
     def list_sessions(self):
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
